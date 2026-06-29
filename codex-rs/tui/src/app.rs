@@ -1110,6 +1110,9 @@ See the Codex keymap documentation for supported actions and examples."
             app.chat_widget
                 .add_warning_message(format!("Failed to enable mouse support: {err}"));
         }
+        if agents_dashboard_enabled {
+            app.apply_agents_dashboard_footer_hint();
+        }
         if agents_dashboard_enabled
             && let Err(err) = app.refresh_agents_dashboard(&mut app_server).await
         {

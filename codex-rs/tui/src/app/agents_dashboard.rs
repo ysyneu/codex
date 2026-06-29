@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::chatwidget::DashboardComposerInput;
+use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use codex_app_server_protocol::AgentViewEntry;
 use codex_app_server_protocol::AgentViewUpdateEntryParams;
 use codex_app_server_protocol::AgentViewWorkflowState;
@@ -16,6 +17,7 @@ use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Alignment;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
@@ -233,6 +235,16 @@ impl AgentsDashboardState {
 }
 
 impl App {
+    pub(super) fn apply_agents_dashboard_footer_hint(&mut self) {
+        self.chat_widget.set_footer_hint_override(Some(vec![
+            ("enter".to_string(), "to open".to_string()),
+            ("space".to_string(), "to reply".to_string()),
+            ("p".to_string(), "to pin".to_string()),
+            ("ctrl+x".to_string(), "to hide".to_string()),
+            ("?".to_string(), "for shortcuts".to_string()),
+        ]));
+    }
+
     pub(super) async fn refresh_agents_dashboard(
         &mut self,
         app_server: &mut AppServerSession,
@@ -337,6 +349,22 @@ impl App {
                     kind: KeyEventKind::Press,
                     ..
                 } if self.chat_widget.composer_is_empty() => {
+                    if let Err(err) = self
+                        .open_selected_agents_dashboard_entry(tui, app_server)
+                        .await
+                    {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to open Codex agent session: {err}"
+                        ));
+                    }
+                    return Ok(true);
+                }
+                KeyEvent {
+                    code: KeyCode::Char(' '),
+                    modifiers,
+                    kind: KeyEventKind::Press,
+                    ..
+                } if modifiers.is_empty() && self.chat_widget.composer_is_empty() => {
                     if let Err(err) = self
                         .open_selected_agents_dashboard_entry(tui, app_server)
                         .await
@@ -567,6 +595,7 @@ impl App {
             /*initial_user_message*/ None,
         );
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        self.apply_agents_dashboard_footer_hint();
         self.reset_for_thread_switch(tui)?;
         tui.frame_requester().schedule_frame();
         Ok(())
@@ -870,7 +899,8 @@ fn render_agent_entry_row(
     }
     let title = entry_title(entry);
     let preview = entry_preview(entry);
-    let age = entry_age(entry);
+    let age = entry_age(entry).unwrap_or_else(|| "now".to_string());
+    let status = entry_status_label(entry);
     let marker = if entry.pinned { "✻" } else { "•" };
     let marker_color = match group_for_entry(entry) {
         AgentsDashboardGroup::NeedsInput => Color::Yellow,
@@ -878,20 +908,6 @@ fn render_agent_entry_row(
         AgentsDashboardGroup::Completed => Color::Red,
         AgentsDashboardGroup::Pinned | AgentsDashboardGroup::ReadyForReview => Color::Blue,
     };
-    let mut spans = vec![
-        Span::styled(marker, Style::default().fg(marker_color)),
-        Span::raw(" "),
-        Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
-    ];
-    if !preview.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
-    }
-    if let Some(age) = age {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(age, Style::default().fg(Color::DarkGray)));
-    }
-    let line = Line::from(spans);
     let style = if selected {
         Style::default()
             .bg(Color::Rgb(235, 235, 235))
@@ -901,7 +917,62 @@ fn render_agent_entry_row(
     };
     let row = Rect::new(area.x, *y, area.width, 1);
     buf.set_style(row, style);
-    Paragraph::new(line).style(style).render(row, buf);
+    if row.width < 28 {
+        let line = truncate_line_with_ellipsis_if_overflow(
+            Line::from(vec![
+                Span::styled(marker, Style::default().fg(marker_color)),
+                Span::raw(" "),
+                Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+                Span::styled(status, status_style(entry)),
+            ]),
+            row.width as usize,
+        );
+        Paragraph::new(line).style(style).render(row, buf);
+        *y = y.saturating_add(1);
+        return true;
+    }
+
+    let meta_width = 22_u16.min(row.width / 3).max(10);
+    let title_width = 38_u16.min(row.width.saturating_sub(meta_width + 2).max(12));
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(title_width),
+            Constraint::Min(0),
+            Constraint::Length(meta_width),
+        ])
+        .split(row);
+    let title_line = truncate_line_with_ellipsis_if_overflow(
+        Line::from(vec![
+            Span::styled(marker, Style::default().fg(marker_color)),
+            Span::raw(" "),
+            Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
+        ]),
+        chunks[0].width as usize,
+    );
+    let preview_line = truncate_line_with_ellipsis_if_overflow(
+        Line::from(Span::styled(preview, Style::default().fg(Color::DarkGray))),
+        chunks[1].width as usize,
+    );
+    let meta_line = truncate_line_with_ellipsis_if_overflow(
+        Line::from(vec![
+            Span::styled(status, status_style(entry)),
+            Span::raw("  "),
+            Span::styled(age, Style::default().fg(Color::DarkGray)),
+        ]),
+        chunks[2].width as usize,
+    );
+    Paragraph::new(title_line)
+        .style(style)
+        .render(chunks[0], buf);
+    Paragraph::new(preview_line)
+        .style(style)
+        .render(chunks[1], buf);
+    Paragraph::new(meta_line)
+        .style(style)
+        .alignment(Alignment::Right)
+        .render(chunks[2], buf);
     *y = y.saturating_add(1);
     true
 }
@@ -930,6 +1001,34 @@ fn entry_preview(entry: &AgentViewEntry) -> String {
         .map(|thread| thread.preview.clone())
         .filter(|preview| !preview.trim().is_empty())
         .unwrap_or_else(|| first_line(&entry.initial_prompt))
+}
+
+fn entry_status_label(entry: &AgentViewEntry) -> &'static str {
+    match entry.thread.as_ref().map(|thread| &thread.status) {
+        Some(ThreadStatus::Active { active_flags })
+            if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
+                || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
+        {
+            "needs input"
+        }
+        Some(ThreadStatus::Active { .. }) => "working",
+        Some(ThreadStatus::SystemError) => "error",
+        Some(ThreadStatus::Idle | ThreadStatus::NotLoaded) | None => match entry.view_state {
+            AgentViewWorkflowState::ReadyForReview => "ready",
+            AgentViewWorkflowState::Completed => "completed",
+        },
+    }
+}
+
+fn status_style(entry: &AgentViewEntry) -> Style {
+    match group_for_entry(entry) {
+        AgentsDashboardGroup::NeedsInput => Style::default().fg(Color::Yellow),
+        AgentsDashboardGroup::Working => Style::default().fg(Color::Green),
+        AgentsDashboardGroup::Completed => Style::default().fg(Color::Red),
+        AgentsDashboardGroup::Pinned | AgentsDashboardGroup::ReadyForReview => {
+            Style::default().fg(Color::DarkGray)
+        }
+    }
 }
 
 fn entry_age(entry: &AgentViewEntry) -> Option<String> {
@@ -1038,6 +1137,33 @@ mod tests {
         );
 
         assert_eq!(group_for_entry(&entry), AgentsDashboardGroup::NeedsInput);
+    }
+
+    #[test]
+    fn status_label_reflects_runtime_thread_state() {
+        let working = entry(
+            "01900000-0000-7000-8000-000000000006",
+            false,
+            Some(ThreadStatus::Active {
+                active_flags: vec![],
+            }),
+        );
+        let waiting = entry(
+            "01900000-0000-7000-8000-000000000007",
+            false,
+            Some(ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::WaitingOnUserInput],
+            }),
+        );
+        let failed = entry(
+            "01900000-0000-7000-8000-000000000008",
+            false,
+            Some(ThreadStatus::SystemError),
+        );
+
+        assert_eq!(entry_status_label(&working), "working");
+        assert_eq!(entry_status_label(&waiting), "needs input");
+        assert_eq!(entry_status_label(&failed), "error");
     }
 
     #[test]
