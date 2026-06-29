@@ -340,6 +340,73 @@ fn thread_list_params_accepts_state_db_only_flag() {
 }
 
 #[test]
+fn agent_view_update_params_round_trip_nullable_title_override() {
+    let list_params = serde_json::from_value::<AgentViewListParams>(json!({
+        "cwd": "/tmp/repo"
+    }))
+    .expect("deserialize sparse agent view list params");
+    assert!(!list_params.include_hidden);
+
+    let params = AgentViewUpdateEntryParams {
+        cwd: "/tmp/repo".to_string(),
+        thread_id: "00000000-0000-0000-0000-000000000001".to_string(),
+        view_state: Some(AgentViewWorkflowState::Completed),
+        pinned: Some(true),
+        position: Some(3),
+        title_override: Some(None),
+    };
+
+    let value = serde_json::to_value(&params).expect("serialize agent view update params");
+    assert_eq!(
+        value,
+        json!({
+            "cwd": "/tmp/repo",
+            "threadId": "00000000-0000-0000-0000-000000000001",
+            "viewState": "completed",
+            "pinned": true,
+            "position": 3,
+            "titleOverride": null,
+        })
+    );
+
+    let decoded = serde_json::from_value::<AgentViewUpdateEntryParams>(value)
+        .expect("deserialize agent view update params");
+    assert_eq!(decoded, params);
+
+    let missing = serde_json::from_value::<AgentViewUpdateEntryParams>(json!({
+        "cwd": "/tmp/repo",
+        "threadId": "00000000-0000-0000-0000-000000000001"
+    }))
+    .expect("deserialize sparse agent view update params");
+    assert_eq!(missing.title_override, None);
+}
+
+#[test]
+fn agent_view_list_response_serializes_entries() {
+    let response = AgentViewListResponse {
+        scope_key: "agent-view:abc".to_string(),
+        entries: vec![AgentViewEntry {
+            thread_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            initial_prompt: "audit browser sandbox".to_string(),
+            title_override: Some("browser sandbox mechanism audit".to_string()),
+            view_state: AgentViewWorkflowState::ReadyForReview,
+            pinned: true,
+            position: 2,
+            hidden: false,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_001,
+            last_opened_at: None,
+            thread: None,
+        }],
+    };
+
+    let value = serde_json::to_value(&response).expect("serialize agent view list response");
+    assert_eq!(value["scopeKey"], json!("agent-view:abc"));
+    assert_eq!(value["entries"][0]["viewState"], json!("readyForReview"));
+    assert_eq!(value["entries"][0]["thread"], json!(null));
+}
+
+#[test]
 fn collab_agent_state_maps_interrupted_status() {
     assert_eq!(
         CollabAgentState::from(CoreAgentStatus::Interrupted),

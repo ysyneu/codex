@@ -1,4 +1,5 @@
 mod account;
+mod agent_view;
 mod analytics;
 mod app_list;
 mod attestation;

@@ -634,6 +634,30 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadReadResponse,
     },
+    #[experimental("agentView/list")]
+    AgentViewList => "agentView/list" {
+        params: v2::AgentViewListParams,
+        serialization: global("agent-view"),
+        response: v2::AgentViewListResponse,
+    },
+    #[experimental("agentView/attachThread")]
+    AgentViewAttachThread => "agentView/attachThread" {
+        params: v2::AgentViewAttachThreadParams,
+        serialization: global("agent-view"),
+        response: v2::AgentViewAttachThreadResponse,
+    },
+    #[experimental("agentView/updateEntry")]
+    AgentViewUpdateEntry => "agentView/updateEntry" {
+        params: v2::AgentViewUpdateEntryParams,
+        serialization: global("agent-view"),
+        response: v2::AgentViewUpdateEntryResponse,
+    },
+    #[experimental("agentView/hideEntry")]
+    AgentViewHideEntry => "agentView/hideEntry" {
+        params: v2::AgentViewHideEntryParams,
+        serialization: global("agent-view"),
+        response: v2::AgentViewHideEntryResponse,
+    },
     #[experimental("thread/turns/list")]
     ThreadTurnsList => "thread/turns/list" {
         params: v2::ThreadTurnsListParams,
@@ -3484,6 +3508,51 @@ mod tests {
         };
         let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
         assert_eq!(reason, Some("environment/add"));
+    }
+
+    #[test]
+    fn agent_view_requests_are_marked_experimental_and_serialize() -> Result<()> {
+        let request = ClientRequest::AgentViewList {
+            request_id: RequestId::Integer(1),
+            params: v2::AgentViewListParams {
+                cwd: "/tmp/repo".to_string(),
+                include_hidden: false,
+            },
+        };
+
+        assert_eq!(request.method(), "agentView/list");
+        assert_eq!(
+            request.serialization_scope(),
+            Some(ClientRequestSerializationScope::Global("agent-view"))
+        );
+        assert_eq!(
+            crate::experimental_api::ExperimentalApi::experimental_reason(&request),
+            Some("agentView/list")
+        );
+        assert_eq!(
+            serde_json::to_value(&request)?,
+            json!({
+                "id": 1,
+                "method": "agentView/list",
+                "params": {
+                    "cwd": "/tmp/repo",
+                    "includeHidden": false,
+                },
+            })
+        );
+
+        let hide_request = ClientRequest::AgentViewHideEntry {
+            request_id: RequestId::Integer(2),
+            params: v2::AgentViewHideEntryParams {
+                cwd: "/tmp/repo".to_string(),
+                thread_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            },
+        };
+        assert_eq!(
+            crate::experimental_api::ExperimentalApi::experimental_reason(&hide_request),
+            Some("agentView/hideEntry")
+        );
+        Ok(())
     }
 
     #[test]

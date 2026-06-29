@@ -19,6 +19,7 @@ use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::RequestContext;
 use crate::request_processors::AccountRequestProcessor;
+use crate::request_processors::AgentViewRequestProcessor;
 use crate::request_processors::AppsRequestProcessor;
 use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
@@ -188,6 +189,7 @@ pub(crate) struct MessageProcessor {
     models_refresh_worker: ModelsRefreshWorker,
     skills_watcher: Arc<SkillsWatcher>,
     account_processor: AccountRequestProcessor,
+    agent_view_processor: AgentViewRequestProcessor,
     apps_processor: AppsRequestProcessor,
     catalog_processor: CatalogRequestProcessor,
     command_exec_processor: CommandExecRequestProcessor,
@@ -414,6 +416,12 @@ impl MessageProcessor {
             Arc::clone(&workspace_settings_cache),
             app_list_shutdown_token,
         );
+        let agent_view_processor = AgentViewRequestProcessor::new(
+            Arc::clone(&config),
+            state_db.clone(),
+            Arc::clone(&thread_store),
+            thread_watch_manager.clone(),
+        );
         let catalog_processor = CatalogRequestProcessor::new(
             outgoing.clone(),
             Arc::clone(&skills_watcher),
@@ -557,6 +565,7 @@ impl MessageProcessor {
             models_refresh_worker,
             skills_watcher,
             account_processor,
+            agent_view_processor,
             apps_processor,
             catalog_processor,
             command_exec_processor,
@@ -1223,6 +1232,26 @@ impl MessageProcessor {
             ClientRequest::ThreadRead { params, .. } => {
                 self.thread_processor.thread_read(params).await
             }
+            ClientRequest::AgentViewList { params, .. } => self
+                .agent_view_processor
+                .list(params)
+                .await
+                .map(|response| Some(response.into())),
+            ClientRequest::AgentViewAttachThread { params, .. } => self
+                .agent_view_processor
+                .attach_thread(params)
+                .await
+                .map(|response| Some(response.into())),
+            ClientRequest::AgentViewUpdateEntry { params, .. } => self
+                .agent_view_processor
+                .update_entry(params)
+                .await
+                .map(|response| Some(response.into())),
+            ClientRequest::AgentViewHideEntry { params, .. } => self
+                .agent_view_processor
+                .hide_entry(params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::ThreadTurnsList { params, .. } => {
                 self.thread_processor.thread_turns_list(params).await
             }
