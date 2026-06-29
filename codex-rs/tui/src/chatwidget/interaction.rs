@@ -2,8 +2,29 @@
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComposerInputMode {
+    SubmitToThread,
+    CaptureForDashboard,
+}
+
 impl ChatWidget {
+    pub(crate) fn handle_dashboard_composer_key_event(
+        &mut self,
+        key_event: KeyEvent,
+    ) -> DashboardComposerInput {
+        self.handle_key_event_inner(key_event, ComposerInputMode::CaptureForDashboard)
+    }
+
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
+        let _ = self.handle_key_event_inner(key_event, ComposerInputMode::SubmitToThread);
+    }
+
+    fn handle_key_event_inner(
+        &mut self,
+        key_event: KeyEvent,
+        input_mode: ComposerInputMode,
+    ) -> DashboardComposerInput {
         if self.bottom_pane.has_active_view()
             && !matches!(
                 key_event,
@@ -27,14 +48,14 @@ impl ChatWidget {
             if self.bottom_pane.no_modal_or_popup_active() {
                 self.on_modal_or_popup_closed();
             }
-            return;
+            return DashboardComposerInput::None;
         }
 
         if self.handle_reasoning_shortcut(key_event) {
             self.bottom_pane.clear_quit_shortcut_hint();
             self.quit_shortcut_expires_at = None;
             self.quit_shortcut_key = None;
-            return;
+            return DashboardComposerInput::None;
         }
 
         if key_event.kind == KeyEventKind::Press
@@ -44,7 +65,7 @@ impl ChatWidget {
             self.quit_shortcut_expires_at = None;
             self.quit_shortcut_key = None;
             self.copy_last_agent_markdown();
-            return;
+            return DashboardComposerInput::None;
         }
 
         match key_event {
@@ -55,7 +76,7 @@ impl ChatWidget {
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'c') => {
                 self.on_ctrl_c();
-                return;
+                return DashboardComposerInput::None;
             }
             KeyEvent {
                 code: KeyCode::Char(c),
@@ -64,7 +85,7 @@ impl ChatWidget {
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'d') => {
                 if self.on_ctrl_d() {
-                    return;
+                    return DashboardComposerInput::None;
                 }
                 self.bottom_pane.clear_quit_shortcut_hint();
                 self.quit_shortcut_expires_at = None;
@@ -95,7 +116,7 @@ impl ChatWidget {
                         )));
                     }
                 }
-                return;
+                return DashboardComposerInput::None;
             }
             other if other.kind == KeyEventKind::Press => {
                 self.bottom_pane.clear_quit_shortcut_hint();
@@ -115,7 +136,7 @@ impl ChatWidget {
                 self.refresh_pending_input_preview();
                 self.request_redraw();
             }
-            return;
+            return DashboardComposerInput::None;
         }
 
         const REVIEW_STEER_UNAVAILABLE_MESSAGE: &str = "Steer messages aren't supported during /review. Press Ctrl+C now to cancel the review.";
@@ -129,7 +150,7 @@ impl ChatWidget {
             && !self.should_handle_vim_insert_escape(key_event)
         {
             self.add_warning_message(REVIEW_STEER_UNAVAILABLE_MESSAGE.to_string());
-            return;
+            return DashboardComposerInput::None;
         }
 
         if self.chat_keymap.interrupt_turn.is_pressed(key_event)
@@ -144,7 +165,7 @@ impl ChatWidget {
             } else {
                 self.input_queue.submit_pending_steers_after_interrupt = false;
             }
-            return;
+            return DashboardComposerInput::None;
         }
 
         if matches!(key_event.code, KeyCode::Esc)
@@ -152,11 +173,11 @@ impl ChatWidget {
             && self.should_show_plan_mode_nudge()
         {
             self.dismiss_plan_mode_nudge();
-            return;
+            return DashboardComposerInput::None;
         }
 
         if self.handle_plugins_popup_key_event(key_event) {
-            return;
+            return DashboardComposerInput::None;
         }
 
         match key_event {
@@ -179,9 +200,17 @@ impl ChatWidget {
                 if should_pause_active_goal {
                     self.pause_active_goal_for_interrupt();
                 }
-                self.handle_composer_input_result(input_result, had_modal_or_popup);
+                return match input_mode {
+                    ComposerInputMode::SubmitToThread => {
+                        self.handle_composer_input_result(input_result, had_modal_or_popup);
+                        DashboardComposerInput::None
+                    }
+                    ComposerInputMode::CaptureForDashboard => self
+                        .handle_dashboard_composer_input_result(input_result, had_modal_or_popup),
+                };
             }
         }
+        DashboardComposerInput::None
     }
 
     /// Attach a local image to the composer when the active model supports image inputs.

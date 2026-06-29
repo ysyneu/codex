@@ -96,6 +96,7 @@ impl SessionTarget {
 #[derive(Debug, Clone)]
 pub enum SessionSelection {
     StartFresh,
+    AgentsDashboard,
     Resume(SessionTarget),
     Fork(SessionTarget),
     Exit,
@@ -475,6 +476,7 @@ async fn run_session_picker_with_loader(
                     TuiEvent::Paste(pasted) => {
                         state.handle_paste(pasted);
                     }
+                    TuiEvent::Mouse(_) => {}
                     TuiEvent::Draw | TuiEvent::Resize => {
                         if let Ok(size) = alt.tui.terminal.size() {
                             let list_height =

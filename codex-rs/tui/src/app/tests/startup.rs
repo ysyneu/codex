@@ -32,6 +32,10 @@ fn startup_waiting_gate_is_only_for_fresh_or_exit_session_selection() {
         )),
         false
     );
+    assert_eq!(
+        App::should_wait_for_initial_session(&SessionSelection::AgentsDashboard),
+        false
+    );
 }
 
 #[test]
@@ -67,6 +71,11 @@ fn startup_paused_goal_prompt_gate_is_only_for_quiet_resume() {
     ));
     assert!(!App::should_prompt_for_paused_goal_after_startup_resume(
         &fork, &None, &no_images
+    ));
+    assert!(!App::should_prompt_for_paused_goal_after_startup_resume(
+        &SessionSelection::AgentsDashboard,
+        &None,
+        &no_images
     ));
 }
 
@@ -129,6 +138,15 @@ fn startup_waiting_gate_not_applied_for_resume_or_fork_session_selection() {
     assert_eq!(
         App::should_handle_active_thread_events(
             wait_for_fork,
+            /*has_active_thread_receiver*/ true
+        ),
+        true
+    );
+    let wait_for_agents_dashboard =
+        App::should_wait_for_initial_session(&SessionSelection::AgentsDashboard);
+    assert_eq!(
+        App::should_handle_active_thread_events(
+            wait_for_agents_dashboard,
             /*has_active_thread_receiver*/ true
         ),
         true

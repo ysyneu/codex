@@ -54,6 +54,11 @@ pub struct Cli {
     #[clap(skip)]
     pub fork_show_all: bool,
 
+    /// Internal controls set by the top-level `codex agents` subcommand.
+    /// This is not exposed as a user flag on the base `codex` command.
+    #[clap(skip)]
+    pub agents_dashboard: bool,
+
     #[clap(flatten)]
     pub shared: TuiSharedCliOptions,
 
