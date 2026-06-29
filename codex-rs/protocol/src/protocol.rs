@@ -3261,6 +3261,9 @@ pub struct TurnContextItem {
     /// Effective model-visible mode used as the durable context-diff baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_agent_mode: Option<MultiAgentMode>,
+    /// Custom model-visible mode instructions used as the durable context-diff baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_agent_mode_hint_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realtime_active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5770,6 +5773,7 @@ mod tests {
             collaboration_mode: None,
             multi_agent_version: None,
             multi_agent_mode: None,
+            multi_agent_mode_hint_text: None,
             realtime_active: None,
             effort: None,
             summary: ReasoningSummaryConfig::Auto,

@@ -80,17 +80,38 @@ fn build_multi_agent_mode_update_item(
 ) -> Option<String> {
     let effective_multi_agent_mode = crate::session::multi_agents::effective_multi_agent_mode(next);
     let previous = previous?;
-    if previous.multi_agent_mode == effective_multi_agent_mode {
+    let previous_instructions = match previous.multi_agent_mode {
+        Some(MultiAgentMode::None) | None => None,
+        Some(multi_agent_mode) => Some(
+            MultiAgentModeInstructions::new(
+                multi_agent_mode,
+                previous.multi_agent_mode_hint_text.clone(),
+            )
+            .render(),
+        ),
+    };
+    let next_instructions = effective_multi_agent_mode.map(|multi_agent_mode| {
+        MultiAgentModeInstructions::new(
+            multi_agent_mode,
+            next.config
+                .multi_agent_v2
+                .multi_agent_mode_hint_text
+                .clone(),
+        )
+        .render()
+    });
+    if previous_instructions == next_instructions {
         return None;
     }
 
-    match effective_multi_agent_mode {
-        Some(MultiAgentMode::None) => {
-            Some(MultiAgentModeInstructions::new(MultiAgentMode::None).render())
-        }
-        Some(multi_agent_mode) => Some(MultiAgentModeInstructions::new(multi_agent_mode).render()),
-        None if previous.multi_agent_mode == Some(MultiAgentMode::Proactive) => {
-            Some(MultiAgentModeInstructions::new(MultiAgentMode::ExplicitRequestOnly).render())
+    match next_instructions {
+        Some(instructions) => Some(instructions),
+        None if previous.multi_agent_mode == Some(MultiAgentMode::Proactive)
+            || previous.multi_agent_mode_hint_text.is_some() =>
+        {
+            Some(
+                MultiAgentModeInstructions::new(MultiAgentMode::ExplicitRequestOnly, None).render(),
+            )
         }
         None => None,
     }

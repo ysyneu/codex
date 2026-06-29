@@ -206,6 +206,7 @@ pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION: usiz
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_WAIT_TIMEOUT_MS: i64 = 3600 * 1000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
+const MULTI_AGENT_MODE_HINT_TEXT_MAX_BYTES: usize = 900;
 const DEFAULT_MULTI_AGENT_V2_ROOT_AGENT_USAGE_HINT_TEXT: &str = r#"You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
 At the start of your turn, you are the active agent.
@@ -1144,6 +1145,7 @@ pub struct MultiAgentV2Config {
     pub usage_hint_text: Option<String>,
     pub root_agent_usage_hint_text: Option<String>,
     pub subagent_usage_hint_text: Option<String>,
+    pub multi_agent_mode_hint_text: Option<String>,
     pub tool_namespace: Option<String>,
     pub hide_spawn_agent_metadata: bool,
     pub non_code_mode_only: bool,
@@ -1165,6 +1167,7 @@ impl MultiAgentV2Config {
                 DEFAULT_MULTI_AGENT_V2_SUBAGENT_USAGE_HINT_TEXT,
                 max_concurrent_threads_per_session,
             )),
+            multi_agent_mode_hint_text: None,
             tool_namespace: Some(DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE.to_string()),
             hide_spawn_agent_metadata: true,
             non_code_mode_only: true,
@@ -2473,7 +2476,7 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
     }
 }
 
-fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config {
+fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> std::io::Result<MultiAgentV2Config> {
     let base = multi_agent_v2_toml_config(config_toml.features.as_ref());
     let max_concurrent_threads_per_session = base
         .and_then(|config| config.max_concurrent_threads_per_session)
@@ -2501,6 +2504,30 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         base.map(|config| &config.subagent_usage_hint_text),
         default.subagent_usage_hint_text,
     );
+    let multi_agent_mode_hint_text = base
+        .and_then(|config| config.multi_agent_mode_hint_text.as_ref())
+        .cloned()
+        .or(default.multi_agent_mode_hint_text);
+    if multi_agent_mode_hint_text
+        .as_ref()
+        .is_some_and(|hint_text| hint_text.trim().is_empty())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.multi_agent_v2.multi_agent_mode_hint_text must not be empty",
+        ));
+    }
+    if multi_agent_mode_hint_text
+        .as_ref()
+        .is_some_and(|hint_text| hint_text.len() > MULTI_AGENT_MODE_HINT_TEXT_MAX_BYTES)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "features.multi_agent_v2.multi_agent_mode_hint_text must not exceed {MULTI_AGENT_MODE_HINT_TEXT_MAX_BYTES} bytes"
+            ),
+        ));
+    }
     let tool_namespace = base
         .and_then(|config| config.tool_namespace.as_ref())
         .cloned()
@@ -2512,7 +2539,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         .and_then(|config| config.non_code_mode_only)
         .unwrap_or(default.non_code_mode_only);
 
-    MultiAgentV2Config {
+    Ok(MultiAgentV2Config {
         max_concurrent_threads_per_session,
         min_wait_timeout_ms,
         max_wait_timeout_ms,
@@ -2520,10 +2547,11 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         usage_hint_text,
         root_agent_usage_hint_text,
         subagent_usage_hint_text,
+        multi_agent_mode_hint_text,
         tool_namespace,
         hide_spawn_agent_metadata,
         non_code_mode_only,
-    }
+    })
 }
 
 fn resolve_token_budget_config(
@@ -3381,7 +3409,7 @@ impl Config {
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
         let code_mode = resolve_code_mode_config(&cfg);
-        let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
+        let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg)?;
         let token_budget = resolve_token_budget_config(&cfg, &features)?;
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;
         let current_time_reminder = resolve_current_time_reminder_config(&cfg, &features)?;

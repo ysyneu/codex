@@ -10307,6 +10307,7 @@ default_wait_timeout_ms = 30000
 usage_hint_text = "Custom delegation guidance."
 root_agent_usage_hint_text = "Root guidance."
 subagent_usage_hint_text = "Subagent guidance."
+multi_agent_mode_hint_text = "Custom mode guidance."
 tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 non_code_mode_only = true
@@ -10342,6 +10343,10 @@ non_code_mode_only = true
     assert_eq!(
         config.multi_agent_v2.subagent_usage_hint_text.as_deref(),
         Some("Subagent guidance.")
+    );
+    assert_eq!(
+        config.multi_agent_v2.multi_agent_mode_hint_text.as_deref(),
+        Some("Custom mode guidance.")
     );
     assert_eq!(
         config.multi_agent_v2.tool_namespace.as_deref(),
@@ -10391,7 +10396,8 @@ max_concurrent_threads_per_session = 17
     )
     .expect("multi-agent v2 config should parse");
 
-    let config = resolve_multi_agent_v2_config(&config_toml);
+    let config =
+        resolve_multi_agent_v2_config(&config_toml).expect("multi-agent v2 config should resolve");
     let concurrency_guidance = "There are 17 available concurrency slots, meaning that up to 17 agents can be active at once, including you.";
     let expected_suffix =
         format!("{DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT}\n{concurrency_guidance}");
@@ -10403,6 +10409,33 @@ max_concurrent_threads_per_session = 17
         .into_iter()
         .all(|hint| hint.is_some_and(|hint| hint.ends_with(expected_suffix.as_str())))
     );
+}
+
+#[test]
+fn multi_agent_v2_rejects_invalid_mode_hint_text() {
+    let oversized_hint = "x".repeat(MULTI_AGENT_MODE_HINT_TEXT_MAX_BYTES + 1);
+    for (hint_text, expected_error) in [
+        (
+            " ",
+            "features.multi_agent_v2.multi_agent_mode_hint_text must not be empty".to_string(),
+        ),
+        (
+            oversized_hint.as_str(),
+            format!(
+                "features.multi_agent_v2.multi_agent_mode_hint_text must not exceed {MULTI_AGENT_MODE_HINT_TEXT_MAX_BYTES} bytes"
+            ),
+        ),
+    ] {
+        let config_toml = toml::from_str(&format!(
+            "[features.multi_agent_v2]\nenabled = true\nmulti_agent_mode_hint_text = {hint_text:?}\n"
+        ))
+        .expect("multi-agent v2 config should parse");
+
+        let error = resolve_multi_agent_v2_config(&config_toml)
+            .expect_err("invalid mode hint text should be rejected");
+
+        assert_eq!(error.to_string(), expected_error);
+    }
 }
 
 #[tokio::test]

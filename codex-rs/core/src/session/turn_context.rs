@@ -352,6 +352,13 @@ impl TurnContext {
 
     pub(crate) fn to_turn_context_item(&self) -> TurnContextItem {
         let workspace_roots = self.config.effective_workspace_roots();
+        let multi_agent_mode = super::multi_agents::effective_multi_agent_mode(self);
+        let multi_agent_mode_hint_text = multi_agent_mode.and_then(|_| {
+            self.config
+                .multi_agent_v2
+                .multi_agent_mode_hint_text
+                .clone()
+        });
         #[allow(deprecated)]
         let cwd = self.cwd.clone();
         TurnContextItem {
@@ -370,7 +377,8 @@ impl TurnContext {
             personality: self.personality,
             collaboration_mode: Some(self.collaboration_mode.clone()),
             multi_agent_version: Some(self.multi_agent_version),
-            multi_agent_mode: super::multi_agents::effective_multi_agent_mode(self),
+            multi_agent_mode,
+            multi_agent_mode_hint_text,
             realtime_active: Some(self.realtime_active),
             effort: self.reasoning_effort.clone(),
             summary: ReasoningSummaryConfig::Auto,

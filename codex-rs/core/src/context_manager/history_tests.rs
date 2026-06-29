@@ -231,6 +231,7 @@ fn reference_context_item() -> TurnContextItem {
         collaboration_mode: None,
         multi_agent_version: None,
         multi_agent_mode: None,
+        multi_agent_mode_hint_text: None,
         realtime_active: Some(false),
         effort: None,
         summary: codex_protocol::config_types::ReasoningSummary::Auto,

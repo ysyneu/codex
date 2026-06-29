@@ -296,10 +296,9 @@ pub enum Personality {
     Pragmatic,
 }
 
-/// Controls whether the model receives multi-agent delegation instructions and,
-/// when it does, whether it should only spawn sub-agents after an explicit user
-/// request or may delegate proactively when doing so would help. `none` leaves
-/// the multi-agent tools available without injecting delegation instructions.
+/// Records the effective multi-agent delegation instructions for a turn.
+/// `none` is retained for deprecated API fields and legacy rollout compatibility;
+/// current runtime behavior does not select it.
 #[derive(
     Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS, Default,
 )]
@@ -767,6 +766,14 @@ mod tests {
             let mode: ModeKind = serde_json::from_str(&json).expect("deserialize mode");
             assert_eq!(ModeKind::Default, mode);
         }
+    }
+
+    #[test]
+    fn multi_agent_mode_deserializes_legacy_none() {
+        let mode: MultiAgentMode =
+            serde_json::from_str(r#""none""#).expect("deserialize legacy multi-agent mode");
+
+        assert_eq!(mode, MultiAgentMode::None);
     }
 
     #[test]

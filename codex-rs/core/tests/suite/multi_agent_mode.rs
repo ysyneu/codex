@@ -23,6 +23,7 @@ use serde_json::Value;
 
 const NO_SPAWN_TEXT: &str = "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.";
 const PROACTIVE_TEXT: &str = "Proactive multi-agent delegation is active.";
+const CUSTOM_MODE_HINT_TEXT: &str = "Use the configured delegation policy.";
 
 fn add_ultra_reasoning(model_info: &mut ModelInfo) {
     model_info.supports_reasoning_summaries = true;
@@ -39,6 +40,11 @@ fn configure_multi_agent_v2(config: &mut Config) {
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
+}
+
+fn configure_custom_mode_hint(config: &mut Config) {
+    configure_multi_agent_v2(config);
+    config.multi_agent_v2.multi_agent_mode_hint_text = Some(CUSTOM_MODE_HINT_TEXT.to_string());
 }
 
 fn configure_ultra(config: &mut Config) {
@@ -115,6 +121,217 @@ async fn ultra_reasoning_uses_max_and_proactive_mode() -> Result<()> {
             count_containing(&texts, PROACTIVE_TEXT),
         ),
         (0, 1)
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_mode_hint_overrides_explicit_and_proactive_text() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        (1..=2)
+            .map(|index| {
+                sse(vec![
+                    ev_response_created(&format!("resp-{index}")),
+                    ev_completed(&format!("resp-{index}")),
+                ])
+            })
+            .collect(),
+    )
+    .await;
+    let test = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_custom_mode_hint)
+        .build(&server)
+        .await?;
+
+    submit_turn(&test.codex, "explicit", Some(ReasoningEffort::High)).await?;
+    submit_turn(&test.codex, "proactive", Some(ReasoningEffort::Ultra)).await?;
+
+    let requests = responses.requests();
+    let first_input = requests[0].input();
+    let first_texts = developer_texts(&first_input);
+    let second_input = requests[1].input();
+    let second_texts = developer_texts(&second_input);
+    let instruction_counts = |texts: &[&str]| {
+        (
+            count_containing(texts, CUSTOM_MODE_HINT_TEXT),
+            count_containing(texts, NO_SPAWN_TEXT),
+            count_containing(texts, PROACTIVE_TEXT),
+        )
+    };
+    assert_eq!(instruction_counts(&first_texts), (1, 0, 0));
+    assert_eq!(instruction_counts(&second_texts), (1, 0, 0));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_configured_mode_hint_after_cold_resume_emits_updates() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        (1..=3)
+            .map(|index| {
+                sse(vec![
+                    ev_response_created(&format!("resp-{index}")),
+                    ev_completed(&format!("resp-{index}")),
+                ])
+            })
+            .collect(),
+    )
+    .await;
+    let initial = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_multi_agent_v2)
+        .build(&server)
+        .await?;
+    let home = initial.home.clone();
+    let rollout_path = initial
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("rollout path");
+
+    submit_turn(&initial.codex, "before resume", Some(ReasoningEffort::High)).await?;
+    drop(initial);
+
+    let mut resume_builder = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_custom_mode_hint);
+    let resumed = resume_builder
+        .resume(&server, home.clone(), rollout_path.clone())
+        .await?;
+    submit_turn(
+        &resumed.codex,
+        "after adding custom hint",
+        Some(ReasoningEffort::High),
+    )
+    .await?;
+    drop(resumed);
+
+    let mut second_resume_builder = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_multi_agent_v2);
+    let resumed_without_hint = second_resume_builder
+        .resume(&server, home, rollout_path)
+        .await?;
+    submit_turn(
+        &resumed_without_hint.codex,
+        "after removing custom hint",
+        Some(ReasoningEffort::High),
+    )
+    .await?;
+
+    let requests = responses.requests();
+    let initial_input = requests[0].input();
+    let initial_texts = developer_texts(&initial_input);
+    let custom_input = requests[1].input();
+    let custom_texts = developer_texts(&custom_input);
+    let removed_input = requests[2].input();
+    let removed_texts = developer_texts(&removed_input);
+    assert_eq!(
+        (
+            count_containing(&initial_texts, CUSTOM_MODE_HINT_TEXT),
+            count_containing(&initial_texts, NO_SPAWN_TEXT),
+            count_containing(&custom_texts, CUSTOM_MODE_HINT_TEXT),
+            count_containing(&custom_texts, NO_SPAWN_TEXT),
+            count_containing(&removed_texts, CUSTOM_MODE_HINT_TEXT),
+            count_containing(&removed_texts, NO_SPAWN_TEXT),
+        ),
+        (0, 1, 1, 1, 1, 2)
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_none_rollout_emits_explicit_mode_after_cold_resume() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        (1..=2)
+            .map(|index| {
+                sse(vec![
+                    ev_response_created(&format!("resp-{index}")),
+                    ev_completed(&format!("resp-{index}")),
+                ])
+            })
+            .collect(),
+    )
+    .await;
+    let initial = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_multi_agent_v2)
+        .build(&server)
+        .await?;
+    let home = initial.home.clone();
+    let rollout_path = initial
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("rollout path");
+
+    submit_turn(&initial.codex, "before resume", Some(ReasoningEffort::High)).await?;
+    drop(initial);
+
+    let mut found_turn_context = false;
+    let mut legacy_lines = Vec::new();
+    for line in std::fs::read_to_string(&rollout_path)?.lines() {
+        let mut value: Value = serde_json::from_str(line)?;
+        let is_mode_instruction = value.get("type").and_then(Value::as_str)
+            == Some("response_item")
+            && value
+                .pointer("/payload/content")
+                .and_then(Value::as_array)
+                .is_some_and(|content| {
+                    content.iter().any(|item| {
+                        item.get("text")
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| text.contains(MULTI_AGENT_MODE_OPEN_TAG))
+                    })
+                });
+        if is_mode_instruction {
+            continue;
+        }
+        if value.get("type").and_then(Value::as_str) == Some("turn_context")
+            && let Some(payload) = value.get_mut("payload").and_then(Value::as_object_mut)
+        {
+            payload.insert(
+                "multi_agent_mode".to_string(),
+                Value::String("none".to_string()),
+            );
+            payload.remove("multi_agent_mode_hint_text");
+            found_turn_context = true;
+        }
+        legacy_lines.push(serde_json::to_string(&value)?);
+    }
+    assert!(found_turn_context, "rollout should contain a turn context");
+    std::fs::write(&rollout_path, format!("{}\n", legacy_lines.join("\n")))?;
+
+    let mut resume_builder = test_codex()
+        .with_model_info_override("gpt-5.4", add_ultra_reasoning)
+        .with_config(configure_multi_agent_v2);
+    let resumed = resume_builder.resume(&server, home, rollout_path).await?;
+    submit_turn(&resumed.codex, "after resume", Some(ReasoningEffort::High)).await?;
+
+    let requests = responses.requests();
+    let resumed_input = requests[1].input();
+    let resumed_texts = developer_texts(&resumed_input);
+    assert_eq!(
+        (
+            count_containing(&resumed_texts, MULTI_AGENT_MODE_OPEN_TAG),
+            count_containing(&resumed_texts, NO_SPAWN_TEXT),
+        ),
+        (1, 1)
     );
 
     Ok(())
