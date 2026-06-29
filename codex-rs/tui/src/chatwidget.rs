@@ -513,6 +513,12 @@ pub(crate) enum ExternalEditorState {
     Active,
 }
 
+#[derive(Debug)]
+pub(crate) enum DashboardComposerInput {
+    None,
+    Submitted(UserMessage),
+}
+
 /// Maintains the per-session UI state and interaction state machines for the chat screen.
 ///
 /// `ChatWidget` owns the state derived from the protocol event stream (history cells, streaming
@@ -1896,6 +1902,22 @@ impl ChatWidget {
 
     pub(crate) fn thread_id(&self) -> Option<ThreadId> {
         self.thread_id
+    }
+
+    pub(crate) fn bottom_pane_desired_height(&self, width: u16) -> u16 {
+        self.bottom_pane.desired_height(width)
+    }
+
+    pub(crate) fn render_bottom_pane(&self, area: Rect, buf: &mut Buffer) {
+        self.bottom_pane.render(area, buf);
+    }
+
+    pub(crate) fn bottom_pane_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        self.bottom_pane.cursor_pos(area)
+    }
+
+    pub(crate) fn bottom_pane_cursor_style(&self, area: Rect) -> crossterm::cursor::SetCursorStyle {
+        self.bottom_pane.cursor_style(area)
     }
 
     pub(crate) fn thread_name(&self) -> Option<String> {

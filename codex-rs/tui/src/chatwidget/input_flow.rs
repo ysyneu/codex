@@ -70,6 +70,52 @@ impl ChatWidget {
         self.refresh_plan_mode_nudge();
     }
 
+    pub(super) fn handle_dashboard_composer_input_result(
+        &mut self,
+        input_result: InputResult,
+        had_modal_or_popup: bool,
+    ) -> DashboardComposerInput {
+        let result = match input_result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            }
+            | InputResult::Queued {
+                text,
+                text_elements,
+                ..
+            } => {
+                let user_message = self.user_message_from_submission(text, text_elements);
+                if user_message.text.is_empty()
+                    && user_message.local_images.is_empty()
+                    && user_message.remote_image_urls.is_empty()
+                {
+                    DashboardComposerInput::None
+                } else {
+                    DashboardComposerInput::Submitted(user_message)
+                }
+            }
+            InputResult::Command(cmd) => {
+                self.handle_slash_command_dispatch(cmd);
+                DashboardComposerInput::None
+            }
+            InputResult::ServiceTierCommand(command) => {
+                self.handle_service_tier_command_dispatch(command);
+                DashboardComposerInput::None
+            }
+            InputResult::CommandWithArgs(cmd, args, text_elements) => {
+                self.handle_slash_command_with_args_dispatch(cmd, args, text_elements);
+                DashboardComposerInput::None
+            }
+            InputResult::None => DashboardComposerInput::None,
+        };
+        if had_modal_or_popup && self.bottom_pane.no_modal_or_popup_active() {
+            self.maybe_send_next_queued_input();
+        }
+        self.refresh_plan_mode_nudge();
+        result
+    }
+
     pub(super) fn defer_input_until_settings_applied(&mut self) {
         if !self.bottom_pane.no_modal_or_popup_active() {
             self.input_queue.suppress_queue_autosend = true;

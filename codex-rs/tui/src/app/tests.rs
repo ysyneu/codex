@@ -4101,6 +4101,7 @@ async fn make_test_app() -> App {
         pending_primary_events: VecDeque::new(),
         pending_app_server_requests: PendingAppServerRequests::default(),
         pending_startup_thread_start: false,
+        agents_dashboard: None,
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),
     }
@@ -4166,12 +4167,39 @@ async fn make_test_app_with_channels() -> (
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
             pending_startup_thread_start: false,
+            agents_dashboard: None,
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
         },
         rx,
         op_rx,
     )
+}
+
+#[tokio::test]
+async fn agents_dashboard_start_registers_real_app_server_thread() -> Result<()> {
+    let mut app = Box::pin(make_test_app()).await;
+    app.agents_dashboard = Some(agents_dashboard::AgentsDashboardState::new(
+        app.config.cwd.to_path_buf(),
+    ));
+    let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let user_message =
+        create_initial_user_message(Some("dashboard task".to_string()), Vec::new(), Vec::new())
+            .expect("user message");
+
+    app.start_agents_dashboard_session(&mut tui, &mut app_server, user_message)
+        .await?;
+
+    assert!(app.agents_dashboard_showing_thread());
+    let thread_id = app.chat_widget.thread_id().expect("real thread id");
+    let response = app_server
+        .agent_view_list(app.config.cwd.display().to_string(), false)
+        .await?;
+    assert_eq!(response.entries.len(), 1);
+    assert_eq!(response.entries[0].thread_id, thread_id.to_string());
+    assert_eq!(response.entries[0].initial_prompt, "dashboard task");
+    Ok(())
 }
 
 #[tokio::test]

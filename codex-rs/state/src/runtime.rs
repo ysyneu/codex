@@ -59,6 +59,7 @@ use std::time::Instant;
 use tracing::warn;
 
 mod agent_jobs;
+mod agent_views;
 mod backfill;
 mod external_agent_config_imports;
 mod goals;
@@ -69,6 +70,10 @@ mod remote_control;
 #[cfg(test)]
 mod test_support;
 mod threads;
+
+#[cfg(test)]
+#[path = "runtime/agent_views_tests.rs"]
+mod agent_views_tests;
 
 pub use external_agent_config_imports::ExternalAgentConfigImportDetailsRecord;
 pub use external_agent_config_imports::ExternalAgentConfigImportFailureRecord;

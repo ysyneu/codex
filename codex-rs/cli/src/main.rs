@@ -192,6 +192,9 @@ enum Subcommand {
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
 
+    /// Browse and manage Codex agent sessions for this working directory.
+    Agents(AgentsCommand),
+
     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
@@ -390,6 +393,15 @@ struct ForkCommand {
 
     #[clap(flatten)]
     config_overrides: SessionTuiCli,
+}
+
+#[derive(Debug, Parser)]
+struct AgentsCommand {
+    #[clap(flatten)]
+    remote: InteractiveRemoteOptions,
+
+    #[clap(flatten)]
+    config_overrides: TuiCli,
 }
 
 /// TUI arguments for session commands where a parsed prompt implies an explicit session id.
@@ -1336,6 +1348,26 @@ async fn cli_main(
             .await?;
             handle_app_exit(exit_info)?;
         }
+        Some(Subcommand::Agents(AgentsCommand {
+            remote,
+            config_overrides,
+        })) => {
+            interactive = finalize_agents_interactive(
+                interactive,
+                root_config_overrides.clone(),
+                config_overrides,
+            );
+            let exit_info = run_interactive_tui(
+                interactive,
+                remote.remote.or(root_remote.clone()),
+                remote
+                    .remote_auth_token_env
+                    .or(root_remote_auth_token_env.clone()),
+                arg0_paths.clone(),
+            )
+            .await?;
+            handle_app_exit(exit_info)?;
+        }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1663,13 +1695,14 @@ fn profile_v2_for_subcommand<'a>(
         | Subcommand::Delete(_)
         | Subcommand::Unarchive(_)
         | Subcommand::Fork(_)
+        | Subcommand::Agents(_)
         | Subcommand::Mcp(_)
         | Subcommand::Sandbox(_)
         | Subcommand::Debug(DebugCommand {
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex agents`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
         ),
     }
 }
@@ -2113,6 +2146,7 @@ fn unsupported_subcommand_name_for_strict_config(
         | Some(Subcommand::Delete(_))
         | Some(Subcommand::Unarchive(_))
         | Some(Subcommand::Fork(_))
+        | Some(Subcommand::Agents(_))
         | Some(Subcommand::Doctor(_)) => None,
         Some(Subcommand::AppServer(app_server)) if app_server.subcommand.is_none() => None,
         Some(Subcommand::AppServer(app_server)) => {
@@ -2426,6 +2460,19 @@ fn finalize_fork_interactive(
     interactive
 }
 
+fn finalize_agents_interactive(
+    mut interactive: TuiCli,
+    root_config_overrides: CliConfigOverrides,
+    agents_cli: TuiCli,
+) -> TuiCli {
+    interactive.agents_dashboard = true;
+
+    merge_interactive_cli_flags(&mut interactive, agents_cli);
+    prepend_config_flags(&mut interactive.config_overrides, root_config_overrides);
+
+    interactive
+}
+
 fn finalize_session_archive_interactive(
     mut interactive: TuiCli,
     root_config_overrides: CliConfigOverrides,
@@ -2612,6 +2659,27 @@ mod tests {
         let SessionTuiCli(fork_cli) = fork_cli;
 
         finalize_fork_interactive(interactive, root_overrides, session_id, last, all, fork_cli)
+    }
+
+    fn finalize_agents_from_args(args: &[&str]) -> TuiCli {
+        let cli = MultitoolCli::try_parse_from(args).expect("parse");
+        let MultitoolCli {
+            interactive,
+            config_overrides: root_overrides,
+            subcommand,
+            feature_toggles: _,
+            remote: _,
+        } = cli;
+
+        let Subcommand::Agents(AgentsCommand {
+            remote: _,
+            config_overrides: agents_cli,
+        }) = subcommand.expect("agents present")
+        else {
+            unreachable!()
+        };
+
+        finalize_agents_interactive(interactive, root_overrides, agents_cli)
     }
 
     fn finalize_archive_from_args(args: &[&str]) -> (String, TuiCli, InteractiveRemoteOptions) {
@@ -3454,6 +3522,53 @@ mod tests {
         let interactive = finalize_fork_from_args(["codex", "fork", "--all"].as_ref());
         assert!(interactive.fork_picker);
         assert!(interactive.fork_show_all);
+    }
+
+    #[test]
+    fn agents_command_enters_dashboard() {
+        let interactive = finalize_agents_from_args(["codex", "agents"].as_ref());
+
+        assert!(interactive.agents_dashboard);
+        assert!(!interactive.resume_picker);
+        assert!(!interactive.fork_picker);
+    }
+
+    #[test]
+    fn agents_command_merges_option_flags_and_prompt() {
+        let interactive = finalize_agents_from_args(
+            [
+                "codex",
+                "agents",
+                "--search",
+                "--sandbox",
+                "workspace-write",
+                "--ask-for-approval",
+                "on-request",
+                "-m",
+                "gpt-5.1-test",
+                "-C",
+                "/tmp",
+                "audit this repo",
+            ]
+            .as_ref(),
+        );
+
+        assert!(interactive.agents_dashboard);
+        assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
+        assert_matches!(
+            interactive.sandbox_mode,
+            Some(codex_utils_cli::SandboxModeCliArg::WorkspaceWrite)
+        );
+        assert_matches!(
+            interactive.approval_policy,
+            Some(codex_utils_cli::ApprovalModeCliArg::OnRequest)
+        );
+        assert_eq!(
+            interactive.cwd.as_deref(),
+            Some(std::path::Path::new("/tmp"))
+        );
+        assert!(interactive.web_search);
+        assert_eq!(interactive.prompt.as_deref(), Some("audit this repo"));
     }
 
     #[test]

@@ -13,6 +13,10 @@ use tokio::process::ChildStdout;
 
 use anyhow::Context;
 use anyhow::ensure;
+use codex_app_server_protocol::AgentViewAttachThreadParams;
+use codex_app_server_protocol::AgentViewHideEntryParams;
+use codex_app_server_protocol::AgentViewListParams;
+use codex_app_server_protocol::AgentViewUpdateEntryParams;
 use codex_app_server_protocol::AppsListParams;
 use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::ClientInfo;
@@ -670,6 +674,42 @@ impl TestAppServer {
     ) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("thread/read", params).await
+    }
+
+    /// Send an `agentView/list` JSON-RPC request.
+    pub async fn send_agent_view_list_request(
+        &mut self,
+        params: AgentViewListParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("agentView/list", params).await
+    }
+
+    /// Send an `agentView/attachThread` JSON-RPC request.
+    pub async fn send_agent_view_attach_thread_request(
+        &mut self,
+        params: AgentViewAttachThreadParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("agentView/attachThread", params).await
+    }
+
+    /// Send an `agentView/updateEntry` JSON-RPC request.
+    pub async fn send_agent_view_update_entry_request(
+        &mut self,
+        params: AgentViewUpdateEntryParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("agentView/updateEntry", params).await
+    }
+
+    /// Send an `agentView/hideEntry` JSON-RPC request.
+    pub async fn send_agent_view_hide_entry_request(
+        &mut self,
+        params: AgentViewHideEntryParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("agentView/hideEntry", params).await
     }
 
     /// Send a `thread/turns/list` JSON-RPC request.

@@ -20,6 +20,14 @@ use codex_app_server_client::AppServerPath;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AgentViewAttachThreadParams;
+use codex_app_server_protocol::AgentViewAttachThreadResponse;
+use codex_app_server_protocol::AgentViewHideEntryParams;
+use codex_app_server_protocol::AgentViewHideEntryResponse;
+use codex_app_server_protocol::AgentViewListParams;
+use codex_app_server_protocol::AgentViewListResponse;
+use codex_app_server_protocol::AgentViewUpdateEntryParams;
+use codex_app_server_protocol::AgentViewUpdateEntryResponse;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
@@ -688,6 +696,73 @@ impl AppServerSession {
             .await
             .wrap_err("failed to unarchive session")?;
         Ok(response.thread)
+    }
+
+    pub(crate) async fn agent_view_list(
+        &mut self,
+        cwd: String,
+        include_hidden: bool,
+    ) -> Result<AgentViewListResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AgentViewList {
+                request_id,
+                params: AgentViewListParams {
+                    cwd,
+                    include_hidden,
+                },
+            })
+            .await
+            .wrap_err("agentView/list failed during TUI dashboard lookup")
+    }
+
+    pub(crate) async fn agent_view_attach_thread(
+        &mut self,
+        cwd: String,
+        thread_id: ThreadId,
+        initial_prompt: String,
+    ) -> Result<AgentViewAttachThreadResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AgentViewAttachThread {
+                request_id,
+                params: AgentViewAttachThreadParams {
+                    cwd,
+                    thread_id: thread_id.to_string(),
+                    initial_prompt,
+                },
+            })
+            .await
+            .wrap_err("agentView/attachThread failed while registering dashboard session")
+    }
+
+    pub(crate) async fn agent_view_update_entry(
+        &mut self,
+        params: AgentViewUpdateEntryParams,
+    ) -> Result<AgentViewUpdateEntryResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AgentViewUpdateEntry { request_id, params })
+            .await
+            .wrap_err("agentView/updateEntry failed while updating dashboard session")
+    }
+
+    pub(crate) async fn agent_view_hide_entry(
+        &mut self,
+        cwd: String,
+        thread_id: ThreadId,
+    ) -> Result<AgentViewHideEntryResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AgentViewHideEntry {
+                request_id,
+                params: AgentViewHideEntryParams {
+                    cwd,
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("agentView/hideEntry failed while hiding dashboard session")
     }
 
     pub(crate) async fn thread_metadata_update_branch(

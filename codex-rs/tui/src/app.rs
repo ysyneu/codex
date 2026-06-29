@@ -199,6 +199,7 @@ use uuid::Uuid;
 mod agent_message_consolidation;
 mod agent_navigation;
 mod agent_status_feed;
+mod agents_dashboard;
 mod app_server_event_targets;
 mod app_server_events;
 pub(crate) mod app_server_requests;
@@ -577,6 +578,7 @@ pub(crate) struct App {
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_server_requests: PendingAppServerRequests,
     pending_startup_thread_start: bool,
+    agents_dashboard: Option<agents_dashboard::AgentsDashboardState>,
     // Serialize plugin enablement writes per plugin so stale completions cannot
     // overwrite a newer toggle, even if the plugin is toggled from different
     // cwd contexts.
@@ -881,12 +883,48 @@ impl App {
                 &initial_prompt,
                 &initial_images,
             );
+        let agents_dashboard_enabled =
+            matches!(session_selection, SessionSelection::AgentsDashboard);
+        let agents_dashboard_initial_user_message = agents_dashboard_enabled
+            .then(|| {
+                crate::chatwidget::create_initial_user_message(
+                    initial_prompt.clone(),
+                    initial_images.clone(),
+                    Vec::new(),
+                )
+            })
+            .flatten();
         let thread_and_widget_started_at = Instant::now();
         let pending_startup_thread_start = matches!(
             &session_selection,
             SessionSelection::StartFresh | SessionSelection::Exit
         );
         let (mut chat_widget, initial_started_thread) = match session_selection {
+            SessionSelection::AgentsDashboard => {
+                let init = crate::chatwidget::ChatWidgetInit {
+                    config: config.clone(),
+                    frame_requester: tui.frame_requester(),
+                    app_event_tx: app_event_tx.clone(),
+                    workspace_command_runner: Some(workspace_command_runner.clone()),
+                    initial_user_message: None,
+                    enhanced_keys_supported,
+                    has_chatgpt_account,
+                    has_codex_backend_auth,
+                    model_catalog: model_catalog.clone(),
+                    feedback: feedback.clone(),
+                    is_first_run,
+                    status_account_display: status_account_display.clone(),
+                    runtime_model_provider_base_url: runtime_model_provider_base_url.clone(),
+                    initial_plan_type,
+                    model: Some(model.clone()),
+                    startup_tooltip_override: None,
+                    status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
+                    terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
+                        .clone(),
+                    session_telemetry: session_telemetry.clone(),
+                };
+                (ChatWidget::new_with_app_event(init), None)
+            }
             SessionSelection::StartFresh | SessionSelection::Exit => {
                 spawn_startup_thread_start(&app_server, config.clone(), app_event_tx.clone());
                 // Count a startup tooltip once the initial chat widget can render it.
@@ -1013,6 +1051,8 @@ See the Codex keymap documentation for supported actions and examples."
         })?;
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
+        let agents_dashboard = agents_dashboard_enabled
+            .then(|| agents_dashboard::AgentsDashboardState::new(config.cwd.to_path_buf()));
 
         let mut app = Self {
             model_catalog,
@@ -1062,9 +1102,27 @@ See the Codex keymap documentation for supported actions and examples."
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
             pending_startup_thread_start,
+            agents_dashboard,
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
         };
+        if agents_dashboard_enabled && let Err(err) = tui.set_mouse_capture_enabled(true) {
+            app.chat_widget
+                .add_warning_message(format!("Failed to enable mouse support: {err}"));
+        }
+        if agents_dashboard_enabled {
+            app.apply_agents_dashboard_footer_hint();
+        }
+        if agents_dashboard_enabled
+            && let Err(err) = app.refresh_agents_dashboard(&mut app_server).await
+        {
+            app.chat_widget
+                .add_error_message(format!("Failed to load Codex agents dashboard: {err}"));
+        }
+        if let Some(user_message) = agents_dashboard_initial_user_message {
+            app.start_agents_dashboard_session(tui, &mut app_server, user_message)
+                .await?;
+        }
         if let Some(entry) = startup_hooks_browser {
             app.chat_widget.open_hooks_browser(entry);
         }
@@ -1277,7 +1335,31 @@ See the Codex keymap documentation for supported actions and examples."
         } else {
             match event {
                 TuiEvent::Key(key_event) => {
+                    if self.agents_dashboard_showing_list()
+                        && key_event.kind == KeyEventKind::Press
+                        && matches!(key_event.code, KeyCode::Esc)
+                        && self.chat_widget.no_modal_or_popup_active()
+                        && self.chat_widget.composer_is_empty()
+                    {
+                        return Ok(self
+                            .handle_exit_mode(app_server, ExitMode::ShutdownFirst)
+                            .await);
+                    }
+                    if self
+                        .handle_agents_dashboard_key_event(tui, app_server, key_event)
+                        .await?
+                    {
+                        return Ok(AppRunControl::Continue);
+                    }
                     self.handle_key_event(tui, app_server, key_event).await;
+                }
+                TuiEvent::Mouse(mouse_event) => {
+                    if self
+                        .handle_agents_dashboard_mouse_event(tui, app_server, mouse_event)
+                        .await?
+                    {
+                        return Ok(AppRunControl::Continue);
+                    }
                 }
                 TuiEvent::Paste(pasted) => {
                     // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
@@ -1301,6 +1383,17 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     // Allow widgets to process any pending timers before rendering.
                     self.chat_widget.pre_draw_tick();
+                    if self.agents_dashboard_showing_list() {
+                        if self.agents_dashboard_refresh_due()
+                            && let Err(err) = self.refresh_agents_dashboard(app_server).await
+                        {
+                            self.chat_widget.add_error_message(format!(
+                                "Failed to refresh Codex agents dashboard: {err}"
+                            ));
+                        }
+                        self.render_agents_dashboard_frame(tui)?;
+                        return Ok(AppRunControl::Continue);
+                    }
                     let rendered_area = self.render_chat_widget_frame(tui)?;
                     if self.chat_widget.ambient_pet_image_enabled() {
                         let terminal_size = tui.terminal.size()?;

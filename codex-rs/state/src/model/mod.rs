@@ -1,4 +1,5 @@
 mod agent_job;
+mod agent_view;
 mod backfill_state;
 mod graph;
 mod log;
@@ -13,6 +14,9 @@ pub use agent_job::AgentJobItemCreateParams;
 pub use agent_job::AgentJobItemStatus;
 pub use agent_job::AgentJobProgress;
 pub use agent_job::AgentJobStatus;
+pub use agent_view::AgentViewState;
+pub use agent_view::AgentViewThread;
+pub use agent_view::AgentViewThreadPatch;
 pub use backfill_state::BackfillState;
 pub use backfill_state::BackfillStatus;
 pub use graph::DirectionalThreadSpawnEdgeStatus;
@@ -38,6 +42,7 @@ pub use thread_metadata::ThreadsPage;
 
 pub(crate) use agent_job::AgentJobItemRow;
 pub(crate) use agent_job::AgentJobRow;
+pub(crate) use agent_view::AgentViewThreadRow;
 pub(crate) use thread_goal::ThreadGoalRow;
 pub(crate) use thread_metadata::ThreadRow;
 pub(crate) use thread_metadata::anchor_from_item;

@@ -489,6 +489,7 @@ use uuid::Uuid;
 use codex_app_server_protocol::ServerRequest;
 
 mod account_processor;
+mod agent_view_processor;
 mod apps_processor;
 mod catalog_processor;
 mod command_exec_processor;
@@ -513,6 +514,7 @@ mod turn_processor;
 mod windows_sandbox_processor;
 
 pub(crate) use account_processor::AccountRequestProcessor;
+pub(crate) use agent_view_processor::AgentViewRequestProcessor;
 pub(crate) use apps_processor::AppsRequestProcessor;
 pub(crate) use catalog_processor::CatalogRequestProcessor;
 pub(crate) use command_exec_processor::CommandExecRequestProcessor;

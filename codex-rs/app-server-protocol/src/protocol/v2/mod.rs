@@ -1,6 +1,7 @@
 mod shared;
 
 mod account;
+mod agent_view;
 mod apps;
 mod attestation;
 mod collaboration_mode;
@@ -28,6 +29,7 @@ mod turn;
 mod windows_sandbox;
 
 pub use account::*;
+pub use agent_view::*;
 pub use apps::*;
 pub use attestation::*;
 pub use collaboration_mode::*;
